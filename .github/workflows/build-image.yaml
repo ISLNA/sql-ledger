@@ -1,0 +1,165 @@
+# Build and publish a Docker image to GitHub Container Registry (ghcr.io)
+#
+# Usage:
+#   call this workflow from another workflow like this:
+#   ```yaml
+#   jobs:
+#     build:
+#       uses: ./.github/workflows/build-image.yaml
+#       with:
+#         # Optional: Service name suffix for the image (default: "main")
+#         service_name: "api"
+#         # Optional: Docker context path (default: ".")
+#         docker_context_path: "./src"
+#         # Optional: Custom image tag (default: github.sha)
+#         image_tag: "latest"
+#         # Optional: Custom Dockerfile name (default: "Dockerfile")
+#         dockerfile_name: "Dockerfile.prod"
+#         # Optional: JSON array of paths to watch for changes (e.g. '["src", "package.json"]' or '["."]')
+#         watch_paths: '["src", "package.json"]'
+#
+#   # Access the built image name in subsequent jobs:
+#   deploy:
+#     needs: build
+#     steps:
+#       - run: echo "Built image: ${{ needs.build.outputs.image_name }}"
+#       - run: echo "Had changes: ${{ needs.build.outputs.had_changes }}"
+#   ```
+#
+# Outputs:
+#   image_name: The full image name in format ghcr.io/{owner}/{repo}-{service}:{tag}
+#   had_changes: Whether changes were detected in watched paths (if watch_paths was set)
+#
+#
+name: '🐳 Docker Build'
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        required: false
+        type: string
+        default: 'main'
+        description: Service name suffix for the image
+
+      docker_context_path:
+        required: false
+        type: string
+        default: '.'
+        description: Docker context path
+
+      image_tag:
+        required: false
+        type: string
+        description: Custom image tag (defaults to github.sha)
+
+      dockerfile_name:
+        required: false
+        type: string
+        default: 'Dockerfile'
+        description: Custom Dockerfile name
+
+      watch_paths:
+        required: false
+        type: string
+        description: 'Optional JSON array of paths to watch for changes (e.g. ''["src", "package.json"]'' or ''["."]'' for all files)'
+
+    outputs:
+      image_name:
+        value: ${{ jobs.build-and-push.outputs.image_name }} # Changed from build-docker-image to build-and-push
+        description: 'The full image name in format ghcr.io/{owner}/{repo}-{service}:{tag}'
+      had_changes:
+        value: ${{ jobs.check-changes.outputs.had_changes }}
+        description: 'Whether changes were detected in watched paths (if watch_paths was set)'
+
+permissions:
+  contents: read
+  packages: write
+jobs:
+  check-changes:
+    name: Check Changes
+    runs-on: ubuntu-latest
+    outputs:
+      had_changes: ${{ steps.check_changes.outputs.changed }}
+
+    steps:
+      - name: 🔧 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: 🔍 Check for changes
+        id: check_changes
+        run: |
+          if [ -z "${{ inputs.watch_paths }}" ]; then
+            echo "No watch paths specified, proceeding with build"
+            echo "changed=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Continue with git diff check only if watch paths specified
+          git fetch --depth=2 origin ${{ github.ref }}
+          
+          # Parse the JSON array of paths
+          PATHS=($(echo '${{ inputs.watch_paths }}' | jq -r '.[]'))
+
+          CHANGED=false
+          for path in "${PATHS[@]}"; do
+            echo "Checking for changes in $path"
+            if ! git diff --quiet HEAD^ HEAD "$path"; then
+              echo "Changes detected in $path"
+              CHANGED=true
+              break
+            fi
+          done
+
+          if [ "$CHANGED" = "false" ]; then
+            echo "No changes detected in watched paths"
+          fi
+
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+
+  build-and-push:
+    needs: check-changes # Changed from build-docker-image
+    # Only run if no watch paths or changes detected
+    if: needs.check-changes.outputs.had_changes == 'true' # Changed from build-docker-image
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.set_image_name.outputs.value }}
+
+    steps:
+      - name: 🔧 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 📝 Set output image name
+        id: set_image_name
+        run: |
+          IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}-${{ inputs.service_name }}:${{ inputs.image_tag || github.sha }}"
+          LOWERCASE_IMAGE_NAME=$(echo $IMAGE_NAME | tr '[:upper:]' '[:lower:]')
+          echo "value=$LOWERCASE_IMAGE_NAME" >> $GITHUB_OUTPUT
+
+      - name: 🔑 Log into registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏗️ Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.docker_context_path }}
+          file: ${{ inputs.docker_context_path }}/${{ inputs.dockerfile_name }}
+          push: true
+          tags: ${{ steps.set_image_name.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: ✅ Build Success
+        run: 'echo "Image built: ${{ steps.set_image_name.outputs.value }}"'
