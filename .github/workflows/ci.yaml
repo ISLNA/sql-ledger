@@ -1,0 +1,23 @@
+name: 'SQL Ledger CI'
+
+on:
+  workflow_dispatch:
+    inputs: {} # Add empty inputs to enable manual triggering
+  push:
+    branches:
+      - feat/infra
+      - develop
+      - main
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-image.yaml
+    secrets: inherit
+    with:
+      service_name: 'sql-ledger'
+      image_tag: ${{ github.ref_name == 'main' && 'main' || 'dev' }}
