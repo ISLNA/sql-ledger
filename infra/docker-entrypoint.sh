@@ -9,14 +9,23 @@ locale-gen de_CH
 
 # Create required directories
 echo "Creating required directories..."
-mkdir -p "${RMA_INSTALLATION_PATH}/users"
-mkdir -p "${RMA_INSTALLATION_PATH}/spool"
+mkdir -p "users"
+mkdir -p "spool"
+
+
+echo "Checking for sql-ledger.conf..."
+if [ ! -f ./sql-ledger.conf ]; then
+    echo "sql-ledger.conf not found, creating default..."
+    cp ./sql-ledger.conf.default ./sql-ledger.conf
+fi
 
 # Set up admin password and create members file
 echo "Setting up admin password and creating members file..."
 CRYPTED_PW=$(perl -e "print crypt '${RMA_ADMIN_PASSWORD:-secret}', 'root'")
+CRYPTED_DB_PW=$(perl -e "print pack 'u', '${POSTGRES_PASSWORD}'")
+
 echo "Creating members file with database configuration..."
-cat > "${RMA_INSTALLATION_PATH}/users/members" << EOF
+cat > "./users/members" << EOF
 # SQL-Ledger members configuration
 # Defines database connection parameters and root login credentials
 
@@ -26,9 +35,28 @@ dbdriver=Pg
 dbhost=${POSTGRES_HOST}
 dbname=${POSTGRES_DB}
 dbuser=${POSTGRES_USER}
-dbpasswd=${POSTGRES_PASSWORD}
-dbconnect=dbi:Pg:dbname=${POSTGRES_DB};host=${POSTGRES_HOST}
+dbpasswd=${CRYPTED_DB_PW}
+dbconnect=dbi:Pg:dbname=${POSTGRES_DB};host=${POSTGRES_HOST};port=5432
+
 EOF
+# [admin@${POSTGRES_DB}]
+# charset=UTF8
+# company=sql_ledger
+# dateformat=mm-dd-yy
+# dbconnect=dbi:Pg:dbname=${POSTGRES_DB};host=${POSTGRES_HOST};port=5432
+# dbdriver=Pg
+# dbhost=${POSTGRES_HOST}
+# dbname=${POSTGRES_DB}
+# dboptions=set DateStyle to 'POSTGRES, US';set client_encoding to 'UTF8'
+# dbpasswd=${CRYPTED_DB_PW}
+# dbport=5432
+# dbuser=${POSTGRES_USER}
+# name=Admin
+# numberformat=1,000.00
+# password=${CRYPTED_PW}
+# templates=sql_ledger
+# stylesheet=sql-ledger.css
+# vclimit=1000
 
 echo "Setting up Apache configuration..."
 # Apache virtual host configuration
@@ -65,9 +93,9 @@ a2enconf rma.conf
 a2ensite default-ssl
 
 echo "Setting proper permissions..."
-chown -R www-data:www-data ${RMA_INSTALLATION_PATH}
-chmod -R 755 ${RMA_INSTALLATION_PATH}
-find ${RMA_INSTALLATION_PATH} -name "*.pl" -exec chmod 755 {} \;
+chown -R www-data:www-data ./
+chmod -R 755 ./
+find ./ -name "*.pl" -exec chmod 755 {} \;
 
 # Configure HTTPS redirect for enhanced security
 if [ "${RMA_FORCE_HTTPS}" = "yes" ]; then

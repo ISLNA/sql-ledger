@@ -1,4 +1,4 @@
-FROM debian:12
+FROM httpd:bookworm
 
 # Set environment variables
 ENV RMA_INSTALLATION_PATH=/var/www/html/sql-ledger
@@ -10,6 +10,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
   LANG=en_US.UTF-8 \
   LANGUAGE=en_US:en \
   LC_ALL=en_US.UTF-8
+
+# 
+# ca-certificates \
+#     gpg \
+#     gpg-agent \
+#     libarchive-extract-perl \
+#     libarchive-zip-perl \
+#     libdbd-pg-perl \
+#     libexcel-writer-xlsx-perl \
+#     libio-socket-ssl-perl \
+#     libmojolicious-perl \
+#     libspreadsheet-parsexlsx-perl \
+#     postgresql-client \
 
 ENV DEBIAN_PACKAGES="libmojolicious-perl \
   libdbi-perl \
@@ -31,8 +44,10 @@ ENV DEBIAN_PACKAGES="libmojolicious-perl \
   libgd-graph-perl \
   libyaml-tiny-perl \
   zip \
-  texlive \
-  pdftk"
+  pdftk \
+  texlive \ 
+  texlive-latex-extra \
+  texlive-pstricks"
 
 ENV PERL_MODULES="Mojolicious::Plugin::I18N \
   DBIx::XHTML_Table"
@@ -53,10 +68,36 @@ RUN apt-get update && \
   locales \
   build-essential \
   libpq-dev \
-  texlive-lang-german \
-  texlive-lang-english \
+  wget \
+  perl \
   $DEBIAN_PACKAGES \
   && rm -rf /var/lib/apt/lists/*
+
+# Install TeX Live with small scheme (exactly as in the documentation)
+# RUN wget https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz && \
+#   tar -xzf install-tl-unx.tar.gz && \
+#   cd install-tl-* && \
+#   ./install-tl --scheme=small --no-interaction && \
+#   cd .. && \
+#   rm -rf install-tl-* install-tl-unx.tar.gz
+
+# Set TeX Live PATH
+# ENV PATH="/usr/local/texlive/2024/bin/x86_64-linux:$PATH"
+
+# Initialize user tree and install only essential packages
+# RUN tlmgr init-usertree && \
+#   tlmgr update --self && \
+#   tlmgr install \
+#   zugferd \
+#   tagpdf \
+#   ucs \
+#   pst-barcode \
+#   pstricks \
+#   pstricks-add \
+#   xkeyval \
+#   auto-pst-pdf \
+#   marginnote \
+#   dvipdfmx 
 
 # Generate locales
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
